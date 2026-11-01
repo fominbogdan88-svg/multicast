@@ -1,0 +1,21 @@
+plugins {
+    id 'net.minecraftforge.gradle' version '6.0.+'
+    id 'java'
+}
+
+version = '1.0.0'
+group = 'com.multiaction'
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+minecraft {
+    mappings channel: 'official', version: '1.20.1'
+    runs {
+        client { workingDirectory project.file('run') }
+        server { workingDirectory project.file('run') }
+    }
+}
+
+dependencies {
+    minecraft 'net.minecraftforge:forge:1.20.1-47.2.0'
+}
