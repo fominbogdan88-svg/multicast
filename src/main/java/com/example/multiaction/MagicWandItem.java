@@ -1,22 +1,26 @@
 package com.example.multiaction;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResultHolder;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
-import net.minecraft.world.entity.AreaEffectCloud;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LightningBolt;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.EvokerFangs;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Rarity;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 
 import javax.annotation.Nullable;
@@ -26,7 +30,7 @@ public class MagicWandItem extends Item {
 
     private static final String[] MODES = {
         "⚡ Удар Молнии",
-        "💥 Мощный Взрыв",
+        "🦷 Гнев Земли (Челюсти)",
         "🐉 Дыхание Дракона",
         "💖 Регенерация"
     };
@@ -43,7 +47,6 @@ public class MagicWandItem extends Item {
             return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);
         }
 
-        // Переключение режимов (Shift + ПКМ)
         if (player.isCrouching()) {
             int currentMode = stack.getOrCreateTag().getInt("WandMode");
             int nextMode = (currentMode + 1) % MODES.length;
@@ -54,15 +57,13 @@ public class MagicWandItem extends Item {
             return InteractionResultHolder.success(stack);
         }
 
-        // Проверка опыта (требуется 15 очков XP)
         int xpCost = 15;
         if (!player.getAbilities().instabuild && player.totalExperience < xpCost) {
-            player.displayClientMessage(Component.literal("§cНедостаточно опыта! Требуется " + xpCost + " XP."), true);
+            player.displayClientMessage(Component.literal("§cНедостаточно опыта! (Нужно 15 XP)"), true);
             level.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.DISPENSER_FAIL, SoundSource.PLAYERS, 0.5F, 0.8F);
             return InteractionResultHolder.fail(stack);
         }
 
-        // Мультипликатор 0x - 16x
         int multiplier = ActionHandler.getRandomMultiplier(player);
 
         if (multiplier == 0) {
@@ -71,7 +72,6 @@ public class MagicWandItem extends Item {
             return InteractionResultHolder.success(stack);
         }
 
-        // Снятие XP
         if (!player.getAbilities().instabuild) {
             player.giveExperiencePoints(-xpCost);
         }
@@ -84,7 +84,7 @@ public class MagicWandItem extends Item {
         level.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.EVOKER_CAST_SPELL, SoundSource.PLAYERS, 1.0F, 1.0F);
 
         switch (mode) {
-            case 0: // Молния
+            case 0:
                 for (int i = 0; i < multiplier; i++) {
                     LightningBolt lightning = EntityType.LIGHTNING_BOLT.create(level);
                     if (lightning != null) {
@@ -96,24 +96,43 @@ public class MagicWandItem extends Item {
                 }
                 break;
 
-            case 1: // Взрыв
-                float power = 2.0F + (multiplier * 0.6F);
-                level.explode(player, targetPos.getX() + 0.5, targetPos.getY() + 0.5, targetPos.getZ() + 0.5, power, Level.ExplosionInteraction.TNT);
+            case 1:
+                int radius = Math.min(10, multiplier);
+                for (int i = 0; i < multiplier * 2; i++) {
+                    double angle = i * (Math.PI * 2 / (multiplier * 2));
+                    double dx = targetPos.getX() + 0.5 + Math.cos(angle) * radius * level.random.nextDouble();
+                    double dz = targetPos.getZ() + 0.5 + Math.sin(angle) * radius * level.random.nextDouble();
+                    EvokerFangs fangs = new EvokerFangs(level, dx, targetPos.getY(), dz, 0, 0, player);
+                    level.addFreshEntity(fangs);
+                }
                 break;
 
-            case 2: // Дыхание Дракона
-                AreaEffectCloud cloud = new AreaEffectCloud(level, targetPos.getX() + 0.5, targetPos.getY() + 1.0, targetPos.getZ() + 0.5);
-                cloud.setOwner(player);
-                cloud.setRadius(2.0F + (multiplier * 0.5F));
-                cloud.setDuration(100 * multiplier);
-                cloud.setParticle(net.minecraft.core.particles.ParticleTypes.DRAGON_BREATH);
-                cloud.addEffect(new MobEffectInstance(MobEffects.HARM, 20, Math.max(0, multiplier / 3)));
-                level.addFreshEntity(cloud);
+            case 2:
+                double effectRadius = 2.0 + (multiplier * 0.5);
+                AABB box = new AABB(targetPos).inflate(effectRadius);
+                List<LivingEntity> entities = level.getEntitiesOfClass(LivingEntity.class, box);
+
+                if (level instanceof ServerLevel serverLevel) {
+                    serverLevel.sendParticles(ParticleTypes.DRAGON_BREATH, targetPos.getX() + 0.5, targetPos.getY() + 1.0, targetPos.getZ() + 0.5, multiplier * 20, effectRadius / 2, 0.5, effectRadius / 2, 0.05);
+                }
+
+                for (LivingEntity entity : entities) {
+                    if (entity != player) {
+                        entity.addEffect(new MobEffectInstance(MobEffects.WITHER, 100 * multiplier, Math.min(3, multiplier / 4)));
+                    }
+                }
                 break;
 
-            case 3: // Регенерация
-                int amp = Math.min(4, (multiplier - 1) / 3);
-                player.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 100 * multiplier, amp));
+            case 3:
+                int regenAmplifier = Math.min(4, (multiplier - 1) / 3);
+                int durationTicks = 160 + (multiplier * 60);
+
+                player.addEffect(new MobEffectInstance(MobEffects.REGENERATION, durationTicks, regenAmplifier, false, true, true));
+
+                if (level instanceof ServerLevel serverLevel) {
+                    serverLevel.sendParticles(ParticleTypes.HEART, player.getX(), player.getY() + 1.0, player.getZ(), 5 + multiplier * 2, 0.4, 0.6, 0.4, 0.1);
+                }
+                level.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.PLAYER_LEVELUP, SoundSource.PLAYERS, 0.6F, 1.5F);
                 break;
         }
 
@@ -126,7 +145,6 @@ public class MagicWandItem extends Item {
         int mode = stack.getOrCreateTag().getInt("WandMode");
         tooltip.add(Component.literal("§7Текущий режим: §b" + MODES[mode]));
         tooltip.add(Component.literal("§8• Shift + ПКМ: Смена режима"));
-        tooltip.add(Component.literal("§8• ПКМ: Каст заклинания (15 XP)"));
-        tooltip.add(Component.literal("§d• Поддерживает Мультипликатор (0x - 16x)"));
+        tooltip.add(Component.literal("§8• ПКМ: Каст (15 XP)"));
     }
 }
