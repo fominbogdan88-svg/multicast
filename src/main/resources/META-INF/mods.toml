@@ -5,19 +5,19 @@ license="MIT"
 [[mods]]
 modId="multiaction"
 version="1.0.0"
-displayName="MultiAction"
-description="Multiplies your actions!"
+displayName="MultiAction Mod"
+description="Каждое действие срабатывает от 0 до 16 раз! Включает Волшебную Палочку."
 
 [[dependencies.multiaction]]
-modId="forge"
-mandatory=true
-versionRange="[47,)"
-ordering="NONE"
-side="BOTH"
+    modId="forge"
+    mandatory=true
+    versionRange="[47,)"
+    ordering="NONE"
+    side="BOTH"
 
 [[dependencies.multiaction]]
-modId="minecraft"
-mandatory=true
-versionRange="[1.20.1]"
-ordering="NONE"
-side="BOTH"
+    modId="minecraft"
+    mandatory=true
+    versionRange="[1.20.1,1.21)"
+    ordering="NONE"
+    side="BOTH"
