@@ -1,281 +1,252 @@
-package com.multiaction;
+package com.example.multiaction;
 
-import net.minecraft.ChatFormatting;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
+import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.sounds.SoundEvents;
-import net.minecraft.sounds.SoundSource;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.food.FoodProperties;
+import net.minecraft.world.entity.projectile.Arrow;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.alchemy.PotionUtils;
+import net.minecraft.world.item.alchemy.Potions;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.storage.loot.LootParams;
-import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
-import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.event.entity.living.LivingEntityUseItemEvent;
-import net.minecraftforge.event.entity.living.LivingHurtEvent;
+import net.minecraftforge.event.RegisterCommandsEvent;
+import net.minecraftforge.event.entity.player.ArrowLooseEvent;
 import net.minecraftforge.event.entity.player.ItemFishedEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.entity.player.PlayerXpEvent;
+import net.minecraftforge.event.entity.living.LivingHurtEvent;
+import net.minecraftforge.event.entity.living.LivingEntityUseItemEvent;
+import net.minecraftforge.event.entity.living.MobEffectEvent;
 import net.minecraftforge.event.level.BlockEvent;
+import net.minecraftforge.event.level.ExplosionEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Random;
+import java.util.*;
 
-@Mod.EventBusSubscriber(modid = "multiaction")
+@Mod.EventBusSubscriber(modid = MultiActionMod.MODID)
 public class ActionHandler {
-    private static final Random RNG = new Random();
-    private static boolean busy = false;
 
-    // Шансы: 0 = 3%, 1 = 47%, 2-15 = 49%, 16 = 1%
-    private static final int[] WEIGHTS = {
-        30,  // 0  (3.0%) - Провал
-        470, // 1  (47.0%) - Обычное
-        180, // 2  (18.0%)
-        100, // 3  (10.0%)
-        60,  // 4  (6.0%)
-        40,  // 5  (4.0%)
-        30,  // 6  (3.0%)
-        20,  // 7  (2.0%)
-        15,  // 8  (1.5%)
-        15,  // 9  (1.5%)
-        10,  // 10 (1.0%)
-        8,   // 11 (0.8%)
-        6,   // 12 (0.6%)
-        3,   // 13 (0.3%)
-        2,   // 14 (0.2%)
-        1,   // 15 (0.1%)
-        10   // 16 (1.0%) - ДЖЕКПОТ
+    private static final Map<UUID, Integer> FORCED_MULTIPLIERS = new HashMap<>();
+    private static final Random RANDOM = new Random();
+
+    // Веса от 0x до 16x
+    private static final int[] MULTIPLIER_WEIGHTS = {
+        30, 470, 180, 100, 60, 40, 30, 20, 15, 15, 10, 8, 6, 3, 2, 1, 10
     };
 
-    private static int roll() {
-        int r = RNG.nextInt(1000);
-        int sum = 0;
-        for (int i = 0; i < WEIGHTS.length; i++) {
-            sum += WEIGHTS[i];
-            if (r < sum) return i;
+    public static int getRandomMultiplier(Player player) {
+        if (player != null && FORCED_MULTIPLIERS.containsKey(player.getUUID())) {
+            return FORCED_MULTIPLIERS.get(player.getUUID());
         }
+
+        int luckBonus = 0;
+        if (player != null && player.hasEffect(MobEffects.LUCK)) {
+            MobEffectInstance luck = player.getEffect(MobEffects.LUCK);
+            if (luck != null) {
+                luckBonus = (luck.getAmplifier() + 1) * 150;
+            }
+        }
+
+        int totalWeight = 0;
+        for (int w : MULTIPLIER_WEIGHTS) totalWeight += w;
+
+        int roll = RANDOM.nextInt(totalWeight);
+        if (luckBonus > 0) {
+            roll = Math.min(totalWeight - 1, roll + luckBonus);
+        }
+
+        int current = 0;
+        for (int i = 0; i < MULTIPLIER_WEIGHTS.length; i++) {
+            current += MULTIPLIER_WEIGHTS[i];
+            if (roll < current) return i;
+        }
+
         return 1;
     }
 
-    private static void notify(Player p, String action, int n) {
-        if (p == null || p.level().isClientSide()) return;
-        
-        if (n == 0) {
-            p.sendSystemMessage(Component.literal("✘ " + action + " - ОТМЕНЕНО!").withStyle(ChatFormatting.RED, ChatFormatting.BOLD));
-            p.level().playSound(null, p.getX(), p.getY(), p.getZ(), SoundEvents.VILLAGER_NO, SoundSource.PLAYERS, 1.0f, 1.0f);
-        } else if (n >= 10) {
-            p.sendSystemMessage(Component.literal("★ МЕГА ДЖЕКПОТ! " + action + " x" + n).withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
-            p.level().playSound(null, p.getX(), p.getY(), p.getZ(), SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, SoundSource.PLAYERS, 1.0f, 1.0f);
-        } else if (n > 1) {
-            p.sendSystemMessage(Component.literal("⚡ " + action + " x" + n).withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD));
-            p.level().playSound(null, p.getX(), p.getY(), p.getZ(), SoundEvents.EXPERIENCE_ORB_PICKUP, SoundSource.PLAYERS, 0.5f, 1.2f);
-        }
-    }
-
-    private static void spawnItem(ServerLevel level, double x, double y, double z, ItemStack stack) {
-        if (stack.isEmpty()) return;
-        ItemEntity item = new ItemEntity(level, x, y, z, stack.copy());
-        item.setDefaultPickUpDelay();
-        level.addFreshEntity(item);
-    }
-
-    // 1. ЛОМАНИЕ БЛОКОВ (Умножение предметов)
     @SubscribeEvent
-    public static void onBreak(BlockEvent.BreakEvent e) {
-        Player player = e.getPlayer();
-        if (player == null || busy || player.isCreative()) return;
-        if (!(e.getLevel() instanceof ServerLevel level)) return;
+    public static void onRegisterCommands(RegisterCommandsEvent event) {
+        event.getDispatcher().register(
+            Commands.literal("multiaction")
+                .requires(source -> source.hasPermission(2))
+                .then(Commands.argument("level", IntegerArgumentType.integer(-1, 16))
+                    .executes(context -> {
+                        ServerPlayer player = context.getSource().getPlayerOrException();
+                        int level = IntegerArgumentType.getInteger(context, "level");
+                        if (level == -1) {
+                            FORCED_MULTIPLIERS.remove(player.getUUID());
+                            context.getSource().sendSuccess(() -> Component.literal("§a[MultiAction] Мультипликатор сброшен на рандом."), false);
+                        } else {
+                            FORCED_MULTIPLIERS.put(player.getUUID(), level);
+                            context.getSource().sendSuccess(() -> Component.literal("§a[MultiAction] Установлен мультипликатор: " + level + "x"), false);
+                        }
+                        return 1;
+                    }))
+                .then(Commands.literal("luckpotion")
+                    .executes(context -> {
+                        ServerPlayer player = context.getSource().getPlayerOrException();
+                        ItemStack potionStack = PotionUtils.setPotion(new ItemStack(Items.POTION), Potions.LUCK);
+                        player.getInventory().add(potionStack);
+                        context.getSource().sendSuccess(() -> Component.literal("§aВы получили зелье Удачи!"), false);
+                        return 1;
+                    }))
+        );
+    }
 
-        int n = roll();
-        if (n == 0) {
-            e.setCanceled(true);
-            notify(player, "Ломание блока", 0);
+    @SubscribeEvent
+    public static void onExplosionStart(ExplosionEvent.Start event) {
+        Level level = event.getLevel();
+        if (level.isClientSide) return;
+
+        Player player = level.getNearestPlayer(event.getExplosion().getPosition().x, event.getExplosion().getPosition().y, event.getExplosion().getPosition().z, 16.0, false);
+        int multiplier = getRandomMultiplier(player);
+
+        if (multiplier == 0) {
+            event.setCanceled(true);
             return;
         }
-        if (n == 1) return;
 
-        BlockPos pos = e.getPos();
-        BlockState state = e.getState();
-
-        LootParams.Builder builder = new LootParams.Builder(level)
-                .withParameter(LootContextParams.ORIGIN, Vec3.atCenterOf(pos))
-                .withParameter(LootContextParams.TOOL, player.getMainHandItem())
-                .withOptionalParameter(LootContextParams.THIS_ENTITY, player)
-                .withOptionalParameter(LootContextParams.BLOCK_ENTITY, level.getBlockEntity(pos));
-
-        List<ItemStack> drops = new ArrayList<>(state.getDrops(builder));
-        
-        // Защита: если дроп пустой (например, копаем землю рукой), создаем предмет блока насильно!
-        if (drops.isEmpty() && !state.is(Blocks.AIR)) {
-            ItemStack defaultDrop = new ItemStack(state.getBlock().asItem());
-            if (!defaultDrop.isEmpty()) {
-                drops.add(defaultDrop);
-            }
-        }
-
-        // Спавним дополнительные копии дропа
-        for (int i = 0; i < n - 1; i++) {
-            for (ItemStack drop : drops) {
-                spawnItem(level, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, drop);
-            }
-        }
-        notify(player, "Дроп блоков", n);
-    }
-
-    // 2. УСТАНОВКА БЛОКОВ (Застройка)
-    @SubscribeEvent
-    public static void onPlace(BlockEvent.EntityPlaceEvent e) {
-        if (busy) return;
-        if (!(e.getEntity() instanceof Player player)) return;
-        if (player.level().isClientSide() || player.isCreative()) return;
-
-        int n = roll();
-        if (n == 0) {
-            e.setCanceled(true);
-            notify(player, "Установка блока", 0);
-            return;
-        }
-        if (n > 1 && e.getLevel() instanceof ServerLevel level) {
-            BlockPos pos = e.getPos();
-            BlockState state = e.getPlacedBlock();
-            BlockPos[] offsets = {
-                pos.above(), pos.north(), pos.south(), pos.east(), pos.west(), pos.below()
-            };
-            int placed = 0;
-            busy = true;
-            try {
-                for (BlockPos offset : offsets) {
-                    if (placed >= n - 1) break;
-                    if (level.getBlockState(offset).isAir()) {
-                        level.setBlock(offset, state, 3);
-                        placed++;
-                    }
-                }
-            } finally {
-                busy = false;
-            }
-            if (placed > 0) notify(player, "Размещение блоков", placed + 1);
+        for (int i = 1; i < multiplier; i++) {
+            double ox = (RANDOM.nextDouble() - 0.5) * 4.0;
+            double oz = (RANDOM.nextDouble() - 0.5) * 4.0;
+            level.explode(null, event.getExplosion().getPosition().x + ox, event.getExplosion().getPosition().y, event.getExplosion().getPosition().z + oz, 3.0F, Level.ExplosionInteraction.TNT);
         }
     }
 
-    // 3. АТАКА (Множитель урона)
     @SubscribeEvent
-    public static void onHurt(LivingHurtEvent e) {
-        if (busy) return;
-        if (!(e.getSource().getEntity() instanceof Player player)) return;
-        if (player.level().isClientSide()) return;
+    public static void onArrowLoose(ArrowLooseEvent event) {
+        Player player = event.getEntity();
+        if (player.level().isClientSide) return;
 
-        int n = roll();
-        if (n == 0) {
-            e.setCanceled(true);
-            notify(player, "Атака", 0);
+        int multiplier = getRandomMultiplier(player);
+        if (multiplier == 0) {
+            event.setCanceled(true);
             return;
         }
-        if (n > 1) {
-            e.setAmount(e.getAmount() * n);
-            notify(player, "Урон", n);
+
+        for (int i = 1; i < multiplier; i++) {
+            Arrow arrow = new Arrow(player.level(), player);
+            arrow.shootFromRotation(player, player.getXRot() + (RANDOM.nextFloat() - 0.5F) * 12.0F, player.getYRot() + (RANDOM.nextFloat() - 0.5F) * 12.0F, 0.0F, event.getCharge() * 0.1F, 1.0F);
+            player.level().addFreshEntity(arrow);
         }
     }
 
-    // 4. КРАФТ
     @SubscribeEvent
-    public static void onCraft(PlayerEvent.ItemCraftedEvent e) {
-        Player player = e.getEntity();
-        if (player.level().isClientSide()) return;
+    public static void onBlockBreak(BlockEvent.BreakEvent event) {
+        Player player = event.getPlayer();
+        if (player == null || event.getLevel().isClientSide()) return;
 
-        int n = roll();
-        ItemStack result = e.getCrafting();
-        if (n == 0) {
-            result.setCount(0);
-            notify(player, "Крафт", 0);
+        int multiplier = getRandomMultiplier(player);
+        if (multiplier == 0) {
+            event.setCanceled(true);
             return;
         }
-        if (n > 1 && player.level() instanceof ServerLevel level) {
-            int extraCount = result.getCount() * (n - 1);
-            int maxStack = result.getMaxStackSize();
-            while (extraCount > 0) {
-                ItemStack stack = result.copy();
-                stack.setCount(Math.min(extraCount, maxStack));
-                spawnItem(level, player.getX(), player.getY() + 0.5, player.getZ(), stack);
-                extraCount -= maxStack;
-            }
-            notify(player, "Крафт", n);
-        }
-    }
 
-    // 5. ЕДА
-    @SubscribeEvent
-    public static void onEat(LivingEntityUseItemEvent.Finish e) {
-        if (!(e.getEntity() instanceof Player player)) return;
-        if (player.level().isClientSide()) return;
+        Level level = (Level) event.getLevel();
+        BlockPos startPos = event.getPos();
+        BlockState targetState = event.getState();
 
-        ItemStack item = e.getItem();
-        if (!item.isEdible()) return;
+        int extraBlocksBroken = 0;
+        Queue<BlockPos> queue = new LinkedList<>();
+        queue.add(startPos);
+        Set<BlockPos> visited = new HashSet<>();
+        visited.add(startPos);
 
-        FoodProperties food = item.getItem().getFoodProperties(item, player);
-        if (food == null) return;
-
-        int n = roll();
-        if (n == 0) {
-            player.getFoodData().setFoodLevel(Math.max(0, player.getFoodData().getFoodLevel() - food.getNutrition()));
-            notify(player, "Еда", 0);
-            return;
-        }
-        if (n > 1) {
-            for (int i = 0; i < n - 1; i++) {
-                player.getFoodData().eat(food.getNutrition(), food.getSaturationModifier());
-            }
-            notify(player, "Еда", n);
-        }
-    }
-
-    // 6. ОПЫТ
-    @SubscribeEvent
-    public static void onXP(PlayerXpEvent.XpChange e) {
-        if (busy) return;
-        Player player = e.getEntity();
-        if (player.level().isClientSide()) return;
-
-        int n = roll();
-        if (n == 0) {
-            e.setCanceled(true);
-            notify(player, "Опыт", 0);
-            return;
-        }
-        if (n > 1) {
-            busy = true;
-            e.setAmount(e.getAmount() * n);
-            notify(player, "Опыт", n);
-            busy = false;
-        }
-    }
-
-    // 7. РЫБАЛКА
-    @SubscribeEvent
-    public static void onFish(ItemFishedEvent e) {
-        Player player = e.getEntity();
-        if (player.level().isClientSide()) return;
-
-        int n = roll();
-        if (n == 0) {
-            e.setCanceled(true);
-            notify(player, "Рыбалка", 0);
-            return;
-        }
-        if (n > 1 && player.level() instanceof ServerLevel level) {
-            for (int i = 0; i < n - 1; i++) {
-                for (ItemStack drop : e.getDrops()) {
-                    spawnItem(level, player.getX(), player.getY() + 0.5, player.getZ(), drop);
+        while (!queue.isEmpty() && extraBlocksBroken < multiplier - 1) {
+            BlockPos current = queue.poll();
+            for (BlockPos neighbor : BlockPos.betweenClosed(current.offset(-1, -1, -1), current.offset(1, 1, 1))) {
+                BlockPos copyPos = neighbor.immutable();
+                if (!visited.contains(copyPos) && level.getBlockState(copyPos).is(targetState.getBlock())) {
+                    visited.add(copyPos);
+                    level.destroyBlock(copyPos, true, player);
+                    extraBlocksBroken++;
+                    queue.add(copyPos);
+                    if (extraBlocksBroken >= multiplier - 1) break;
                 }
             }
-            notify(player, "Рыбалка", n);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onPotionApplicable(MobEffectEvent.Applicable event) {
+        int multiplier = getRandomMultiplier(null);
+        if (multiplier == 0) {
+            event.setResult(net.minecraftforge.eventbus.api.Event.Result.DENY);
+            return;
+        }
+
+        MobEffectInstance effect = event.getEffectInstance();
+        int newDuration = effect.getDuration() * multiplier;
+        int newAmp = Math.min(4, effect.getAmplifier() + (multiplier > 8 ? 2 : (multiplier > 3 ? 1 : 0)));
+
+        MobEffectInstance updated = new MobEffectInstance(effect.getEffect(), newDuration, newAmp, effect.isAmbient(), effect.isVisible());
+        event.getEntity().addEffect(updated);
+        event.setResult(net.minecraftforge.eventbus.api.Event.Result.DENY);
+    }
+
+    @SubscribeEvent
+    public static void onLivingHurt(LivingHurtEvent event) {
+        Player attacker = (event.getSource().getEntity() instanceof Player p) ? p : null;
+        int multiplier = getRandomMultiplier(attacker);
+        if (multiplier == 0) {
+            event.setCanceled(true);
+        } else {
+            event.setAmount(event.getAmount() * multiplier);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onItemCrafted(PlayerEvent.ItemCraftedEvent event) {
+        int multiplier = getRandomMultiplier(event.getEntity());
+        if (multiplier > 1) {
+            ItemStack extra = event.getCrafting().copy();
+            extra.setCount(extra.getCount() * (multiplier - 1));
+            event.getEntity().getInventory().add(extra);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onItemUseFinish(LivingEntityUseItemEvent.Finish event) {
+        if (event.getEntity() instanceof Player player) {
+            int multiplier = getRandomMultiplier(player);
+            if (multiplier > 1 && event.getItem().isEdible()) {
+                player.getFoodData().eat(event.getItem().getItem().getFoodProperties().getNutrition() * (multiplier - 1), 0.5F);
+            }
+        }
+    }
+
+    @SubscribeEvent
+    public static void onXpChange(PlayerXpEvent.XpChange event) {
+        int multiplier = getRandomMultiplier(event.getEntity());
+        if (multiplier == 0) {
+            event.setCanceled(true);
+        } else {
+            event.setAmount(event.getAmount() * multiplier);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onItemFished(ItemFishedEvent event) {
+        Player player = event.getEntity();
+        int multiplier = getRandomMultiplier(player);
+        if (multiplier == 0) {
+            event.setCanceled(true);
+        } else if (multiplier > 1) {
+            for (ItemStack stack : event.getDrops()) {
+                for (int i = 1; i < multiplier; i++) {
+                    ItemEntity entity = new ItemEntity(player.level(), player.getX(), player.getY() + 0.5, player.getZ(), stack.copy());
+                    player.level().addFreshEntity(entity);
+                }
+            }
         }
     }
 }
