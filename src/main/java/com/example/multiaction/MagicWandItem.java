@@ -39,6 +39,12 @@ public class MagicWandItem extends Item {
         super(new Item.Properties().stacksTo(1).rarity(Rarity.EPIC));
     }
 
+    // Делает предмет визуально зачарованным (переливается магическим блеском)
+    @Override
+    public boolean isFoil(ItemStack stack) {
+        return true;
+    }
+
     @Override
     public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
         ItemStack stack = player.getItemInHand(hand);
