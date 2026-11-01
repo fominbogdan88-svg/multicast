@@ -5,8 +5,8 @@ license="MIT"
 [[mods]]
 modId="multiaction"
 version="1.0.0"
-displayName="Multi-Action"
-description='''Any action can trigger 0-16 times!'''
+displayName="MultiAction"
+description="Multiplies your actions!"
 
 [[dependencies.multiaction]]
 modId="forge"
