@@ -39,7 +39,6 @@ public class MagicWandItem extends Item {
         super(new Item.Properties().stacksTo(1).rarity(Rarity.EPIC));
     }
 
-    // Делает предмет визуально зачарованным (переливается магическим блеском)
     @Override
     public boolean isFoil(ItemStack stack) {
         return true;
@@ -63,9 +62,10 @@ public class MagicWandItem extends Item {
             return InteractionResultHolder.success(stack);
         }
 
-        int xpCost = 15;
+        // Новая сниженная стоимость: 5 XP
+        int xpCost = 5;
         if (!player.getAbilities().instabuild && player.totalExperience < xpCost) {
-            player.displayClientMessage(Component.literal("§cНедостаточно опыта! (Нужно 15 XP)"), true);
+            player.displayClientMessage(Component.literal("§cНедостаточно опыта! (Нужно " + xpCost + " XP)"), true);
             level.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.DISPENSER_FAIL, SoundSource.PLAYERS, 0.5F, 0.8F);
             return InteractionResultHolder.fail(stack);
         }
@@ -73,7 +73,7 @@ public class MagicWandItem extends Item {
         int multiplier = ActionHandler.getRandomMultiplier(player);
 
         if (multiplier == 0) {
-            player.displayClientMessage(Component.literal("§c💨 Заклинание сорвалось! (0x)"), true);
+            player.displayClientMessage(Component.literal("§4✘ Заклинание сорвалось! (0x)"), true);
             level.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.FIRE_EXTINGUISH, SoundSource.PLAYERS, 0.5F, 1.0F);
             return InteractionResultHolder.success(stack);
         }
@@ -86,7 +86,7 @@ public class MagicWandItem extends Item {
         HitResult hit = player.pick(40.0D, 0.0F, false);
         BlockPos targetPos = (hit.getType() != HitResult.Type.MISS) ? BlockPos.containing(hit.getLocation()) : player.blockPosition().relative(player.getDirection(), 5);
 
-        player.displayClientMessage(Component.literal("§a✨ Магия сработала! (" + multiplier + "x)"), true);
+        player.displayClientMessage(Component.literal("§d✨ Магия сработала! (" + multiplier + "x)"), true);
         level.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.EVOKER_CAST_SPELL, SoundSource.PLAYERS, 1.0F, 1.0F);
 
         switch (mode) {
@@ -151,6 +151,6 @@ public class MagicWandItem extends Item {
         int mode = stack.getOrCreateTag().getInt("WandMode");
         tooltip.add(Component.literal("§7Текущий режим: §b" + MODES[mode]));
         tooltip.add(Component.literal("§8• Shift + ПКМ: Смена режима"));
-        tooltip.add(Component.literal("§8• ПКМ: Каст (15 XP)"));
+        tooltip.add(Component.literal("§8• ПКМ: Каст (5 XP)"));
     }
 }
