@@ -32,7 +32,7 @@ public class MagicWandItem extends Item {
     };
 
     public MagicWandItem() {
-        super(new Item.Properties().maxStackSize(1).rarity(Rarity.EPIC));
+        super(new Item.Properties().stacksTo(1).rarity(Rarity.EPIC));
     }
 
     @Override
