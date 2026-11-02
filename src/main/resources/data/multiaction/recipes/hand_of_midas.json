@@ -1,0 +1,5 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [ { "item": "minecraft:golden_horse_armor" }, { "item": "minecraft:golden_horse_armor" } ],
+  "result": { "item": "multiaction:hand_of_midas", "count": 1 }
+}
