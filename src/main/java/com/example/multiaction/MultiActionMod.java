@@ -1,18 +1,18 @@
 package com.example.multiaction;
 
 import net.minecraft.client.KeyMapping;
-import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
 import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.client.event.InputEvent;
 import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.BuildCreativeModeTabContentsEvent;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.NetworkRegistry;
@@ -29,10 +29,15 @@ public class MultiActionMod {
     public static final String MODID = "multiaction";
 
     public static final DeferredRegister<Item> ITEMS = DeferredRegister.create(ForgeRegistries.ITEMS, MODID);
-    public static final RegistryObject<Item> MAGIC_WAND = ITEMS.register("magic_wand", MagicWandItem::new);
+
+    public static final RegistryObject<Item> MAGIC_WAND = ITEMS.register("magic_wand",
+            () -> new MagicWandItem(new Item.Properties().stacksTo(1)));
+
+    public static final RegistryObject<Item> HAND_OF_MIDAS = ITEMS.register("hand_of_midas",
+            () -> new HandOfMidasItem(new Item.Properties().stacksTo(1).rarity(net.minecraft.world.item.Rarity.EPIC)));
 
     private static final String PROTOCOL_VERSION = "1";
-    public static final SimpleChannel PACKET_HANDLER = NetworkRegistry.newSimpleChannel(
+    public static final SimpleChannel NETWORK = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(MODID, "main"),
             () -> PROTOCOL_VERSION,
             PROTOCOL_VERSION::equals,
@@ -42,33 +47,34 @@ public class MultiActionMod {
     public MultiActionMod() {
         IEventBus modEventBus = FMLJavaModLoadingContext.get().getModEventBus();
         ITEMS.register(modEventBus);
-        modEventBus.addListener(this::setup);
-        MinecraftForge.EVENT_BUS.register(ActionHandler.class);
-    }
+        modEventBus.addListener(this::addCreative);
+        MinecraftForge.EVENT_BUS.register(this);
 
-    private void setup(final FMLCommonSetupEvent event) {
-        PACKET_HANDLER.registerMessage(0, FartPacket.class, FartPacket::encode, FartPacket::new, FartPacket::handle);
-    }
-
-    public static class FartPacket {
-        public FartPacket() {}
-        public FartPacket(FriendlyByteBuf buf) {}
-        public void encode(FriendlyByteBuf buf) {}
-        public void handle(Supplier<NetworkEvent.Context> ctx) {
-            ctx.get().enqueueWork(() -> {
-                ServerPlayer player = ctx.get().getSender();
-                if (player != null) {
-                    ActionHandler.triggerFart(player);
+        NETWORK.registerMessage(0, FartPacket.class,
+                (msg, buf) -> {},
+                buf -> new FartPacket(),
+                (msg, ctx) -> {
+                    ctx.get().enqueueWork(() -> {
+                        ServerPlayer player = ctx.get().getSender();
+                        if (player != null) ActionHandler.triggerFart(player);
+                    });
+                    ctx.get().setPacketHandled(true);
                 }
-            });
-            ctx.get().setPacketHandled(true);
+        );
+    }
+
+    private void addCreative(BuildCreativeModeTabContentsEvent event) {
+        if (event.getTabKey() == CreativeModeTabs.TOOLS_AND_UTILITIES) {
+            event.accept(MAGIC_WAND.get());
+            event.accept(HAND_OF_MIDAS.get());
         }
     }
 
-    @Mod.EventBusSubscriber(modid = MODID, bus = Mod.EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
-    public static class ClientModEvents {
-        public static final KeyMapping FART_KEY = new KeyMapping("Пукнуть (Мультикаст)", GLFW.GLFW_KEY_G, "MultiAction");
+    public static class FartPacket {}
 
+    @Mod.EventBusSubscriber(modid = MODID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.MOD)
+    public static class ClientModEvents {
+        public static final KeyMapping FART_KEY = new KeyMapping("key.multiaction.fart", GLFW.GLFW_KEY_G, "category.multiaction");
         @SubscribeEvent
         public static void onKeyRegister(RegisterKeyMappingsEvent event) {
             event.register(FART_KEY);
@@ -78,9 +84,11 @@ public class MultiActionMod {
     @Mod.EventBusSubscriber(modid = MODID, value = Dist.CLIENT)
     public static class ClientForgeEvents {
         @SubscribeEvent
-        public static void onKeyInput(InputEvent.Key event) {
-            if (ClientModEvents.FART_KEY.consumeClick()) {
-                PACKET_HANDLER.sendToServer(new FartPacket());
+        public static void onClientTick(TickEvent.ClientTickEvent event) {
+            if (event.phase == TickEvent.Phase.END) {
+                while (ClientModEvents.FART_KEY.consumeClick()) {
+                    NETWORK.sendToServer(new FartPacket());
+                }
             }
         }
     }
