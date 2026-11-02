@@ -11,9 +11,11 @@ import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.AreaEffectCloud;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.AgeableMob;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.item.PrimedTnt;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.FishingHook;
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.item.ItemStack;
@@ -31,6 +33,7 @@ import net.minecraftforge.event.entity.living.LivingDropsEvent;
 import net.minecraftforge.event.entity.living.LivingEntityUseItemEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.event.entity.living.MobEffectEvent;
+import net.minecraftforge.event.entity.living.BabyEntitySpawnEvent;
 import net.minecraftforge.event.entity.player.AnvilRepairEvent;
 import net.minecraftforge.event.entity.player.ItemFishedEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
@@ -47,6 +50,7 @@ import java.util.*;
 public class ActionHandler {
 
     private static final Map<UUID, Integer> FORCED_MULTIPLIERS = new HashMap<>();
+    private static final Set<UUID> EQUAL_CHANCE_PLAYERS = new HashSet<>();
     private static final Random RANDOM = new Random();
     private static final int[] MULTIPLIER_WEIGHTS = {30, 470, 180, 100, 60, 40, 30, 20, 15, 15, 10, 8, 6, 3, 2, 1, 10};
 
@@ -55,6 +59,8 @@ public class ActionHandler {
 
     public static int getRandomMultiplier(Player player) {
         if (player != null && FORCED_MULTIPLIERS.containsKey(player.getUUID())) return FORCED_MULTIPLIERS.get(player.getUUID());
+        if (player != null && EQUAL_CHANCE_PLAYERS.contains(player.getUUID())) return RANDOM.nextInt(17);
+        
         int luckBonus = 0;
         if (player != null && player.hasEffect(MobEffects.LUCK)) {
             MobEffectInstance luck = player.getEffect(MobEffects.LUCK);
@@ -70,6 +76,15 @@ public class ActionHandler {
             if (roll < current) return i;
         }
         return 1;
+    }
+
+    // НОВОЕ: Перевод уровня мультикаста в объем блоков (кубы)
+    private static int getVolumeLimit(int multiplier) {
+        if (multiplier == 0) return 0;
+        if (multiplier == 16) return 64; // 16x = куб 4x4x4 (64 блока)
+        if (multiplier >= 9) return 27;  // 9x-15x = куб 3x3x3 (27 блоков)
+        if (multiplier >= 4) return 8;   // 4x-8x = куб 2x2x2 (8 блоков)
+        return multiplier;               // 1x-3x = 1-3 блока
     }
 
     private static void notifyPlayer(Player player, int rolls, String actionType) {
@@ -124,9 +139,7 @@ public class ActionHandler {
             chatMsg = Component.literal("§7💨 Игрок " + name + " пёрнул.");
         }
         
-        if (player.getServer() != null) {
-            player.getServer().getPlayerList().broadcastSystemMessage(chatMsg, false);
-        }
+        if (player.getServer() != null) player.getServer().getPlayerList().broadcastSystemMessage(chatMsg, false);
     }
 
     @SubscribeEvent
@@ -135,14 +148,58 @@ public class ActionHandler {
             .then(Commands.argument("level", IntegerArgumentType.integer(-1, 16)).executes(context -> {
                 ServerPlayer player = context.getSource().getPlayerOrException();
                 int level = IntegerArgumentType.getInteger(context, "level");
-                if (level == -1) FORCED_MULTIPLIERS.remove(player.getUUID());
-                else FORCED_MULTIPLIERS.put(player.getUUID(), level);
+                if (level == -1) {
+                    FORCED_MULTIPLIERS.remove(player.getUUID());
+                    player.sendSystemMessage(Component.literal("§a[MultiAction] Множитель сброшен на рандом!"));
+                } else {
+                    FORCED_MULTIPLIERS.put(player.getUUID(), level);
+                    EQUAL_CHANCE_PLAYERS.remove(player.getUUID());
+                    player.sendSystemMessage(Component.literal("§a[MultiAction] Принудительный множитель установлен: §l" + level + "x"));
+                }
+                return 1;
+            }))
+            .then(Commands.literal("luckpotion").executes(context -> {
+                ServerPlayer player = context.getSource().getPlayerOrException();
+                player.getInventory().add(PotionUtils.setPotion(new ItemStack(Items.POTION), Potions.LUCK));
+                player.sendSystemMessage(Component.literal("§a[MultiAction] Выдано Зелье Удачи!"));
+                return 1;
+            }))
+            .then(Commands.literal("equal").executes(context -> {
+                ServerPlayer player = context.getSource().getPlayerOrException();
+                UUID id = player.getUUID();
+                if (EQUAL_CHANCE_PLAYERS.contains(id)) {
+                    EQUAL_CHANCE_PLAYERS.remove(id);
+                    player.sendSystemMessage(Component.literal("§e[MultiAction] Режим равных шансов §cВЫКЛЮЧЕН§e.\n§7Вернуты обычные веса."));
+                } else {
+                    EQUAL_CHANCE_PLAYERS.add(id);
+                    FORCED_MULTIPLIERS.remove(id);
+                    player.sendSystemMessage(Component.literal("§e[MultiAction] Режим равных шансов §aВКЛЮЧЁН§e!\n§7Теперь 0x..16x выпадают с одинаковой вероятностью (~5.8%)."));
+                }
                 return 1;
             }))
         );
     }
 
-    // НОВАЯ МЕХАНИКА: МУЛЬТИКАСТ ВЫБРОШЕННЫХ ПРЕДМЕТОВ
+    @SubscribeEvent
+    public static void onBabySpawn(BabyEntitySpawnEvent event) {
+        if (event.getCauser() instanceof Player player && !player.level().isClientSide) {
+            int multiplier = getRandomMultiplier(player);
+            notifyPlayer(player, multiplier, "Breeding");
+            if (multiplier == 0) event.setCanceled(true);
+            else if (multiplier > 1) {
+                Level level = player.level();
+                for (int i = 1; i < multiplier; i++) {
+                    Entity extraBaby = event.getChild().getType().create(level);
+                    if (extraBaby instanceof AgeableMob ageable) {
+                        ageable.setBaby(true);
+                        ageable.setPos(event.getParentA().getX() + (RANDOM.nextDouble() - 0.5), event.getParentA().getY(), event.getParentA().getZ() + (RANDOM.nextDouble() - 0.5));
+                        level.addFreshEntity(ageable);
+                    }
+                }
+            }
+        }
+    }
+
     @SubscribeEvent
     public static void onItemToss(ItemTossEvent event) {
         Player player = event.getPlayer();
@@ -151,18 +208,14 @@ public class ActionHandler {
         int multiplier = getRandomMultiplier(player);
         notifyPlayer(player, multiplier, "Drop");
 
-        if (multiplier == 0) {
-            // Предмет сгорает/исчезает при неудаче
-            event.setCanceled(true); 
-        } else if (multiplier > 1) {
+        if (multiplier == 0) event.setCanceled(true); 
+        else if (multiplier > 1) {
             ItemStack stack = event.getEntity().getItem();
             for (int i = 1; i < multiplier; i++) {
                 ItemEntity extra = new ItemEntity(player.level(), event.getEntity().getX(), event.getEntity().getY(), event.getEntity().getZ(), stack.copy());
-                extra.setPickUpDelay(40); // Задержка подбора (2 секунды), чтобы игрок сразу всё не всосал
+                extra.setPickUpDelay(40); 
                 extra.setDeltaMovement(event.getEntity().getDeltaMovement().add(
-                        (RANDOM.nextDouble() - 0.5) * 0.2,
-                        (RANDOM.nextDouble() - 0.5) * 0.2,
-                        (RANDOM.nextDouble() - 0.5) * 0.2
+                        (RANDOM.nextDouble() - 0.5) * 0.2, (RANDOM.nextDouble() - 0.5) * 0.2, (RANDOM.nextDouble() - 0.5) * 0.2
                 ));
                 player.level().addFreshEntity(extra);
             }
@@ -175,7 +228,7 @@ public class ActionHandler {
         Level level = event.getLevel();
         if (level.isClientSide) return;
 
-        if (entity instanceof Projectile projectile && !projectile.getPersistentData().getBoolean("MulticastDone")) {
+        if (entity instanceof Projectile projectile && !(projectile instanceof FishingHook) && !projectile.getPersistentData().getBoolean("MulticastDone")) {
             projectile.getPersistentData().putBoolean("MulticastDone", true);
             if (projectile.getOwner() instanceof Player player) {
                 int multiplier = getRandomMultiplier(player);
@@ -213,38 +266,51 @@ public class ActionHandler {
         }
     }
 
+    // ИЗМЕНЕНО: Умное размещение блоков по объёму
     @SubscribeEvent
     public static void onBlockPlace(BlockEvent.EntityPlaceEvent event) {
         if (event.getEntity() instanceof Player player && !player.level().isClientSide) {
             int multiplier = getRandomMultiplier(player);
             notifyPlayer(player, multiplier, "Place");
             if (multiplier == 0) { event.setCanceled(true); return; }
-            if (multiplier == 1) return;
+            
+            int limit = getVolumeLimit(multiplier);
+            if (limit <= 1) return; // Если лимит 1, просто ставим 1 блок как обычно
 
             Level level = (Level) event.getLevel();
-            BlockPos pos = event.getPos();
+            BlockPos startPos = event.getPos();
             BlockState placedState = event.getPlacedBlock();
             ItemStack itemInHand = player.getMainHandItem();
 
-            BlockPos[] offsets = { 
-                pos.above(), pos.below(), pos.north(), pos.south(), pos.east(), pos.west(), 
-                pos.above().north(), pos.above().south(), pos.above().east(), pos.above().west(), 
-                pos.below().north(), pos.below().south(), pos.below().east(), pos.below().west(),
-                pos.north().east(), pos.north().west()
-            };
-
             int placed = 0;
-            for (BlockPos targetPos : offsets) {
-                if (placed >= multiplier - 1 || (!player.isCreative() && itemInHand.getCount() <= 0)) break;
-                if (level.isEmptyBlock(targetPos)) {
-                    level.setBlock(targetPos, placedState, 3);
-                    if (!player.isCreative()) itemInHand.shrink(1);
-                    placed++;
+            Queue<BlockPos> queue = new LinkedList<>();
+            Set<BlockPos> visited = new HashSet<>();
+            queue.add(startPos);
+            visited.add(startPos);
+
+            // Алгоритм распространения во все стороны (строит кубы/массивы блоков)
+            while (!queue.isEmpty() && placed < limit - 1) {
+                if (!player.isCreative() && itemInHand.isEmpty()) break;
+                BlockPos current = queue.poll();
+                
+                for (BlockPos neighbor : BlockPos.betweenClosed(current.offset(-1, -1, -1), current.offset(1, 1, 1))) {
+                    BlockPos copyPos = neighbor.immutable();
+                    if (!visited.contains(copyPos)) {
+                        visited.add(copyPos);
+                        if (level.isEmptyBlock(copyPos)) {
+                            level.setBlock(copyPos, placedState, 3);
+                            if (!player.isCreative()) itemInHand.shrink(1);
+                            placed++;
+                            queue.add(copyPos);
+                            if (placed >= limit - 1 || (!player.isCreative() && itemInHand.isEmpty())) break;
+                        }
+                    }
                 }
             }
         }
     }
 
+    // ИЗМЕНЕНО: Умное копание блоков по объёму
     @SubscribeEvent
     public static void onBlockBreak(BlockEvent.BreakEvent event) {
         Player player = event.getPlayer();
@@ -253,7 +319,9 @@ public class ActionHandler {
         int multiplier = getRandomMultiplier(player);
         notifyPlayer(player, multiplier, "Break");
         if (multiplier == 0) { event.setCanceled(true); return; }
-        if (multiplier == 1) return;
+        
+        int limit = getVolumeLimit(multiplier);
+        if (limit <= 1) return;
 
         Level level = (Level) event.getLevel();
         BlockState targetState = event.getState();
@@ -266,7 +334,8 @@ public class ActionHandler {
             queue.add(event.getPos());
             visited.add(event.getPos());
 
-            while (!queue.isEmpty() && broken < multiplier - 1) {
+            // Копаем идентичные блоки, пока не достигнем лимита объёма
+            while (!queue.isEmpty() && broken < limit - 1) {
                 BlockPos current = queue.poll();
                 for (BlockPos neighbor : BlockPos.betweenClosed(current.offset(-1, -1, -1), current.offset(1, 1, 1))) {
                     BlockPos copyPos = neighbor.immutable();
@@ -275,7 +344,7 @@ public class ActionHandler {
                         level.destroyBlock(copyPos, true, player);
                         broken++;
                         queue.add(copyPos);
-                        if (broken >= multiplier - 1) break;
+                        if (broken >= limit - 1) break;
                     }
                 }
             }
