@@ -81,9 +81,9 @@ public class ActionHandler {
 
     private static int getVolumeLimit(int multiplier) {
         if (multiplier == 0) return 0;
-        if (multiplier == 16) return 64; 
-        if (multiplier >= 9) return 27;  
-        if (multiplier >= 4) return 8;   
+        if (multiplier == 16) return 64; // 4x4x4
+        if (multiplier >= 9) return 27;  // 3x3x3
+        if (multiplier >= 4) return 8;   // 2x2x2
         return multiplier;               
     }
 
@@ -180,6 +180,7 @@ public class ActionHandler {
         );
     }
 
+    // ИСПРАВЛЕННЫЙ МЕТОД ОПРЕДЕЛЕНИЯ ИГРОКА ПРИ РАЗМНОЖЕНИИ (БЕЗ GETCAUSER)
     @SubscribeEvent
     public static void onBabySpawn(BabyEntitySpawnEvent event) {
         Player player = null;
