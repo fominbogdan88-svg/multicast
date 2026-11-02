@@ -93,6 +93,101 @@ public class ActionHandler {
             player.displayClientMessage(Component.literal("§4✘ Срыв! (" + actionType + ") FAILED!"), true);
             player.level().playSound(null, player.blockPosition(), SoundEvents.FIRE_EXTINGUISH, SoundSource.PLAYERS, 0.5f, 1.0f);
         } else if (rolls >= 10) {
+package com.example.multiaction;
+
+import com.mojang.brigadier.arguments.IntegerArgumentType;
+import net.minecraft.commands.Commands;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.AreaEffectCloud;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.AgeableMob;
+import net.minecraft.world.entity.animal.Animal;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.item.PrimedTnt;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.FishingHook;
+import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.food.FoodProperties;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.alchemy.PotionUtils;
+import net.minecraft.world.item.alchemy.Potions;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
+import net.minecraftforge.common.IForgeShearable;
+import net.minecraftforge.event.RegisterCommandsEvent;
+import net.minecraftforge.event.entity.EntityJoinLevelEvent;
+import net.minecraftforge.event.entity.item.ItemTossEvent;
+import net.minecraftforge.event.entity.living.LivingDropsEvent;
+import net.minecraftforge.event.entity.living.LivingEntityUseItemEvent;
+import net.minecraftforge.event.entity.living.LivingHurtEvent;
+import net.minecraftforge.event.entity.living.MobEffectEvent;
+import net.minecraftforge.event.entity.living.BabyEntitySpawnEvent;
+import net.minecraftforge.event.entity.player.AnvilRepairEvent;
+import net.minecraftforge.event.entity.player.ItemFishedEvent;
+import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.entity.player.PlayerInteractEvent;
+import net.minecraftforge.event.entity.player.PlayerXpEvent;
+import net.minecraftforge.event.level.BlockEvent;
+import net.minecraftforge.eventbus.api.Event;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.common.Mod;
+
+import java.util.*;
+
+@Mod.EventBusSubscriber(modid = MultiActionMod.MODID)
+public class ActionHandler {
+
+    private static final Map<UUID, Integer> FORCED_MULTIPLIERS = new HashMap<>();
+    private static final Set<UUID> EQUAL_CHANCE_PLAYERS = new HashSet<>();
+    private static final Random RANDOM = new Random();
+    private static final int[] MULTIPLIER_WEIGHTS = {30, 470, 180, 100, 60, 40, 30, 20, 15, 15, 10, 8, 6, 3, 2, 1, 10};
+
+    private static final ThreadLocal<Boolean> IS_BREAKING = ThreadLocal.withInitial(() -> false);
+    private static final ThreadLocal<Boolean> POTION_LOCK = ThreadLocal.withInitial(() -> false);
+
+    public static int getRandomMultiplier(Player player) {
+        if (player != null && FORCED_MULTIPLIERS.containsKey(player.getUUID())) return FORCED_MULTIPLIERS.get(player.getUUID());
+        if (player != null && EQUAL_CHANCE_PLAYERS.contains(player.getUUID())) return RANDOM.nextInt(17);
+        
+        int luckBonus = 0;
+        if (player != null && player.hasEffect(MobEffects.LUCK)) {
+            MobEffectInstance luck = player.getEffect(MobEffects.LUCK);
+            if (luck != null) luckBonus = (luck.getAmplifier() + 1) * 150;
+        }
+        int totalWeight = 0;
+        for (int w : MULTIPLIER_WEIGHTS) totalWeight += w;
+        int roll = RANDOM.nextInt(totalWeight);
+        if (luckBonus > 0) roll = Math.min(totalWeight - 1, roll + luckBonus);
+        int current = 0;
+        for (int i = 0; i < MULTIPLIER_WEIGHTS.length; i++) {
+            current += MULTIPLIER_WEIGHTS[i];
+            if (roll < current) return i;
+        }
+        return 1;
+    }
+
+    private static int getVolumeLimit(int multiplier) {
+        if (multiplier == 0) return 0;
+        if (multiplier == 16) return 64; 
+        if (multiplier >= 9) return 27;  
+        if (multiplier >= 4) return 8;   
+        return multiplier;               
+    }
+
+    private static void notifyPlayer(Player player, int rolls, String actionType) {
+        if (player == null || player.level().isClientSide) return;
+        if (rolls == 0) {
+            player.displayClientMessage(Component.literal("§4✘ Срыв! (" + actionType + ") FAILED!"), true);
+            player.level().playSound(null, player.blockPosition(), SoundEvents.FIRE_EXTINGUISH, SoundSource.PLAYERS, 0.5f, 1.0f);
+        } else if (rolls >= 10) {
             player.displayClientMessage(Component.literal("§6★ MEGA MULTI-" + actionType + "! x" + rolls), true);
             player.level().playSound(null, player.blockPosition(), SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, SoundSource.PLAYERS, 0.6f, 1.2f);
         } else if (rolls >= 5) {
@@ -180,13 +275,23 @@ public class ActionHandler {
         );
     }
 
+    // ИСПРАВЛЕННЫЙ МЕТОД ОПРЕДЕЛЕНИЯ ИГРОКА ПРИ РАЗМНОЖЕНИИ
     @SubscribeEvent
     public static void onBabySpawn(BabyEntitySpawnEvent event) {
-        if (event.getCauser() instanceof Player player && !player.level().isClientSide) {
+        Player player = null;
+        if (event.getParentA() instanceof Animal animal) {
+            player = animal.getLoveCause();
+        }
+        if (player == null && event.getParentB() instanceof Animal animal) {
+            player = animal.getLoveCause();
+        }
+
+        if (player != null && !player.level().isClientSide) {
             int multiplier = getRandomMultiplier(player);
             notifyPlayer(player, multiplier, "Breeding");
-            if (multiplier == 0) event.setCanceled(true);
-            else if (multiplier > 1) {
+            if (multiplier == 0) {
+                event.setCanceled(true);
+            } else if (multiplier > 1) {
                 Level level = player.level();
                 for (int i = 1; i < multiplier; i++) {
                     Entity extraBaby = event.getChild().getType().create(level);
@@ -266,7 +371,6 @@ public class ActionHandler {
         }
     }
 
-    // ИЗМЕНЕНО: Умное размещение блоков по объёму
     @SubscribeEvent
     public static void onBlockPlace(BlockEvent.EntityPlaceEvent event) {
         if (event.getEntity() instanceof Player player && !player.level().isClientSide) {
@@ -275,7 +379,7 @@ public class ActionHandler {
             if (multiplier == 0) { event.setCanceled(true); return; }
             
             int limit = getVolumeLimit(multiplier);
-            if (limit <= 1) return; // Если лимит 1, просто ставим 1 блок как обычно
+            if (limit <= 1) return; 
 
             Level level = (Level) event.getLevel();
             BlockPos startPos = event.getPos();
@@ -288,7 +392,6 @@ public class ActionHandler {
             queue.add(startPos);
             visited.add(startPos);
 
-            // Алгоритм распространения во все стороны (строит кубы/массивы блоков)
             while (!queue.isEmpty() && placed < limit - 1) {
                 if (!player.isCreative() && itemInHand.isEmpty()) break;
                 BlockPos current = queue.poll();
@@ -310,7 +413,6 @@ public class ActionHandler {
         }
     }
 
-    // ИЗМЕНЕНО: Умное копание блоков по объёму
     @SubscribeEvent
     public static void onBlockBreak(BlockEvent.BreakEvent event) {
         Player player = event.getPlayer();
@@ -334,7 +436,6 @@ public class ActionHandler {
             queue.add(event.getPos());
             visited.add(event.getPos());
 
-            // Копаем идентичные блоки, пока не достигнем лимита объёма
             while (!queue.isEmpty() && broken < limit - 1) {
                 BlockPos current = queue.poll();
                 for (BlockPos neighbor : BlockPos.betweenClosed(current.offset(-1, -1, -1), current.offset(1, 1, 1))) {
@@ -388,6 +489,8 @@ public class ActionHandler {
                 int multiplier = getRandomMultiplier(event.getEntity());
                 notifyPlayer(event.getEntity(), multiplier, "Shear");
                 if (multiplier == 0) { event.setCanceled(true); return; }
+                if (multiplier > 1) {
+                    List<ItemStant.setCanceled(true); return; }
                 if (multiplier > 1) {
                     List<ItemStack> drops = shearable.onSheared(event.getEntity(), event.getItemStack(), event.getLevel(), event.getTarget().blockPosition(), 0);
                     for (ItemStack drop : drops) {
