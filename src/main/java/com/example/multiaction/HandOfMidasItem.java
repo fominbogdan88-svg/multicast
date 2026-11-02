@@ -45,12 +45,13 @@ public class HandOfMidasItem extends Item {
             if (player.experienceLevel < 16 && maxHealth > 30) continue;
 
             t.addEffect(new MobEffectInstance(MobEffects.GLOWING, 40, 1));
-            int totalExp = maxHealth * multiplier;
+
+            int totalExp = (int) (maxHealth * 5.0f * multiplier);
             ExperienceOrb.award((ServerLevel) level, t.position(), totalExp);
 
-            ((ServerLevel) level).sendParticles(ParticleTypes.TOTEM_OF_UNDYING, t.getX(), t.getY() + 1.0, t.getZ(), 30, 0.5, 0.5, 0.5, 0.1);
+            ((ServerLevel) level).sendParticles(ParticleTypes.TOTEM_OF_UNDYING, t.getX(), t.getY() + 1.0, t.getZ(), 35, 0.5, 0.5, 0.5, 0.1);
             level.playSound(null, t.blockPosition(), SoundEvents.AMETHYST_BLOCK_CHIME, SoundSource.PLAYERS, 1.0f, 1.0f);
-            
+
             t.discard();
             used = true;
         }
