@@ -64,11 +64,14 @@ public class MultiActionMod {
                             return 1;
                         } else if (args[0].equalsIgnoreCase("balance")) {
                             ActionHandler.setMode("balance");
-                            player.sendSystemMessage(Component.literal("§bРежим вероятностей: СБАЛАНСИРОВАННЫЙ (экономичный)"));
+                            player.sendSystemMessage(Component.literal("§bРежим вероятностей: СБАЛАНСИРОВАННЫЙ"));
                             return 1;
                         } else if (args[0].equalsIgnoreCase("normal")) {
                             ActionHandler.setMode("normal");
                             player.sendSystemMessage(Component.literal("§aРежим вероятностей: СТАНДАРТНЫЙ"));
+                            return 1;
+                        } else if (args[0].equalsIgnoreCase("gas") || args[0].equalsIgnoreCase("fart")) {
+                            ActionHandler.performGasAttack(player);
                             return 1;
                         } else {
                             try {
@@ -81,7 +84,7 @@ public class MultiActionMod {
                                 }
                                 return 1;
                             } catch (NumberFormatException e) {
-                                player.sendSystemMessage(Component.literal("§cОшибка: введите число, equal, balance, normal или luckpotion."));
+                                player.sendSystemMessage(Component.literal("§cОшибка команды."));
                                 return 0;
                             }
                         }
