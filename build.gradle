@@ -3,14 +3,9 @@ plugins {
     id 'idea'
     id 'net.minecraftforge.gradle' version '[6.0,6.2)'
 }
-
-group = 'com.example'
-version = '1.0.0'
-
-base {
-    archivesName = 'multiaction'
-}
-
+version = '1.0'
+group = 'com.example.multiaction'
+base { archivesName = 'multiaction' }
 java.toolchain.languageVersion = JavaLanguageVersion.of(17)
 
 minecraft {
@@ -20,11 +15,13 @@ minecraft {
             workingDirectory project.file('run')
             property 'forge.logging.markers', 'REGISTRIES'
             property 'forge.logging.console.level', 'debug'
-            mods {
-                multiaction {
-                    source sourceSets.main
-                }
-            }
+            mods { multiaction { source sourceSets.main } }
+        }
+        server {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'debug'
+            mods { multiaction { source sourceSets.main } }
         }
     }
 }
@@ -33,15 +30,16 @@ dependencies {
     minecraft 'net.minecraftforge:forge:1.20.1-47.2.0'
 }
 
-tasks.named('jar', Jar).configure {
+jar {
     manifest {
         attributes([
-            'Specification-Title'     : 'multiaction',
-            'Specification-Vendor'    : 'example',
-            'Specification-Version'   : '1',
-            'Implementation-Title'    : project.name,
-            'Implementation-Version'  : project.jar.archiveVersion,
-            'Implementation-Vendor'   : 'example'
+                "Specification-Title"     : "multiaction",
+                "Specification-Vendor"    : "example",
+                "Specification-Version"   : "1",
+                "Implementation-Title"    : project.name,
+                "Implementation-Version"  : project.jar.archiveVersion,
+                "Implementation-Vendor"   : "example",
+                "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
         ])
     }
 }
