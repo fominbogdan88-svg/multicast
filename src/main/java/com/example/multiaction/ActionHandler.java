@@ -119,6 +119,26 @@ public class ActionHandler {
         return 1;
     }
 
+    public static void performGasAttack(Player player) {
+        if (player.level().isClientSide) return;
+        int mult = getMultiplier(player);
+        if (mult <= 0) return;
+
+        player.level().playSound(null, player.blockPosition(), SoundEvents.FIRE_EXTINGUISH, SoundSource.PLAYERS, 1.0f, 0.5f);
+        
+        if (player.getServer() != null) {
+            player.getServer().getPlayerList().broadcastSystemMessage(
+                Component.literal("§e" + player.getName().getString() + " §7совершил газенваген! (" + mult + "x)"), false
+            );
+        }
+
+        AreaEffectCloud cloud = new AreaEffectCloud(player.level(), player.getX(), player.getY(), player.getZ());
+        cloud.setRadius(2.5f * mult);
+        cloud.setDuration(100 * mult);
+        cloud.addEffect(new MobEffectInstance(MobEffects.POISON, 100 * mult, 1));
+        player.level().addFreshEntity(cloud);
+    }
+
     @SubscribeEvent
     public static void onPlayerTick(TickEvent.PlayerTickEvent event) {
         if (event.phase == TickEvent.Phase.END && !event.player.level().isClientSide) {
@@ -270,7 +290,7 @@ public class ActionHandler {
             int mult = getMultiplier(player);
             if (mult > 1) {
                 Vec3 look = player.getLookAngle();
-                player.addDeltaMovement(look.x * mult * 0.15, look.y * mult * 0.15, look.z * mult * 0.15);
+                player.addDeltaMovement(new Vec3(look.x * mult * 0.15, look.y * mult * 0.15, look.z * mult * 0.15));
                 player.hurtMarked = true;
             }
         }
@@ -286,8 +306,9 @@ public class ActionHandler {
 
                 int mult = getMultiplier(player);
                 if (mult > 1) {
+                    LivingEntity owner = firework.getOwner() instanceof LivingEntity le ? le : null;
                     for (int i = 1; i < mult; i++) {
-                        FireworkRocketEntity clone = new FireworkRocketEntity(event.getLevel(), firework.getItem(), firework.getOwner());
+                        FireworkRocketEntity clone = new FireworkRocketEntity(event.getLevel(), firework.getItem(), owner);
                         clone.setPos(firework.getX(), firework.getY(), firework.getZ());
                         clone.setDeltaMovement(firework.getDeltaMovement().add((Math.random() - 0.5) * 0.4, (Math.random() - 0.5) * 0.4, (Math.random() - 0.5) * 0.4));
                         clone.addTag("multiplied");
@@ -316,9 +337,9 @@ public class ActionHandler {
 
     @SubscribeEvent
     public static void onBabySpawn(BabyEntitySpawnEvent event) {
-        Player causer = event.getCauser();
+        Player causer = event.getCausedByPlayer();
         if (causer == null && event.getParentA() instanceof Animal animal) {
-            causer = animal.getLoveCause() != null ? animal.getLoveCause() : null;
+            causer = animal.getLoveCause();
         }
         if (causer != null && !causer.level().isClientSide && event.getChild() != null) {
             int mult = getMultiplier(causer);
