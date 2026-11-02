@@ -1,3 +1,6 @@
 {
-  "item.multiaction.magic_wand": "Волшебная Палочка"
+  "item.multiaction.magic_wand": "Волшебная Палочка",
+  "item.multiaction.hand_of_midas": "Рука Мидаса",
+  "key.multiaction.fart": "Пукнуть",
+  "category.multiaction": "Multi Action Mod"
 }
