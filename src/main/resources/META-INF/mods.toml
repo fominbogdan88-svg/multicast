@@ -1,12 +1,13 @@
 modLoader="javafml"
 loaderVersion="[47,)"
-license="MIT"
+license="All rights reserved"
 
 [[mods]]
 modId="multiaction"
-version="1.0.0"
-displayName="MultiAction Mod"
-description="Каждое действие срабатывает от 0 до 16 раз! Включает Волшебную Палочку."
+version="1.0"
+displayName="Multi Action Mod"
+authors="Creator"
+description="Multiplies actions, Hand of Midas, Magic Wand, Farts."
 
 [[dependencies.multiaction]]
     modId="forge"
